@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "slurmssh"
 version = "0.1.0"
@@ -6,5 +10,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["toml"]
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [project.scripts]
 slurmssh = "slurmssh:main"
+
+[tool.setuptools]
+py-modules = ["slurmssh"]

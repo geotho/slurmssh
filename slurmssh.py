@@ -85,8 +85,15 @@ class SlurmSSH:
 
         print(f"Code synced to {self.host}:{self.remote_dir}")
 
-    def _submit_job(self) -> str:
-        sbatch_cmd = f"cd {self.remote_dir} && sbatch {self.launch_script_path}"
+    def _submit_job(self, sbatch_args: Optional[List[str]] = None) -> str:
+        # Build sbatch command with additional arguments
+        cmd_parts = ["cd", self.remote_dir, "&&", "sbatch"]
+        
+        if sbatch_args:
+            cmd_parts.extend(sbatch_args)
+            
+        cmd_parts.append(self.launch_script_path)
+        sbatch_cmd = " ".join(cmd_parts)
 
         result = self._run_ssh_command(sbatch_cmd)
         if result.returncode != 0:
@@ -101,16 +108,17 @@ class SlurmSSH:
         else:
             raise RuntimeError(f"Unexpected sbatch output: {output}")
 
-    def submit(self, exclude: Optional[List[str]] = None):
+    def submit(self, exclude: Optional[List[str]] = None, sbatch_args: Optional[List[str]] = None):
         """
         Main method to sync code and submit job.
 
         Args:
             exclude: List of additional patterns to exclude from rsync
+            sbatch_args: List of additional arguments to pass to sbatch
         """
         try:
             self._sync_code(exclude=exclude)
-            self._submit_job()
+            self._submit_job(sbatch_args=sbatch_args)
 
         except Exception as e:
             print(f"Error: {e}")
@@ -125,6 +133,7 @@ def main():
 Examples:
   slurmssh --ssh username@hostname script.slurm
   slurmssh --ssh user@cluster job.slurm --exclude "data/" "*.log"
+  slurmssh --ssh user@cluster job.slurm arg1 arg2
         """
     )
     
@@ -146,7 +155,17 @@ Examples:
         help="Additional patterns to exclude from rsync"
     )
     
-    args = parser.parse_args()
+    parser.add_argument(
+        "sbatch_args",
+        nargs="*",
+        help="Additional arguments to pass to sbatch"
+    )
+    
+    args, unknown = parser.parse_known_args()
+    
+    # Add any unknown arguments to sbatch_args
+    if unknown:
+        args.sbatch_args.extend(unknown)
     
     # Parse SSH connection string
     if "@" not in args.ssh:
@@ -167,7 +186,7 @@ Examples:
             launch_script_path=args.script
         )
         
-        slurm.submit(exclude=args.exclude)
+        slurm.submit(exclude=args.exclude, sbatch_args=args.sbatch_args)
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
