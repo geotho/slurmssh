@@ -1,0 +1,7 @@
+[project]
+name = "slurmssh"
+version = "0.1.0"
+description = "Sync your code and submit your job to Slurm cluster from your local machine."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["toml"]
