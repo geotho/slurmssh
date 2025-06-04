@@ -1,4 +1,6 @@
+import argparse
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -116,7 +118,60 @@ class SlurmSSH:
 
 
 def main():
-    print("Hello from slurmssh!")
+    parser = argparse.ArgumentParser(
+        description="Sync code and submit jobs to Slurm cluster",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  slurmssh --ssh username@hostname script.slurm
+  slurmssh --ssh user@cluster job.slurm --exclude "data/" "*.log"
+        """
+    )
+    
+    parser.add_argument(
+        "--ssh", 
+        required=True,
+        help="SSH connection string (username@hostname)"
+    )
+    
+    parser.add_argument(
+        "script",
+        help="Path to Slurm job script (.slurm file)"
+    )
+    
+    parser.add_argument(
+        "--exclude",
+        nargs="*",
+        default=[],
+        help="Additional patterns to exclude from rsync"
+    )
+    
+    args = parser.parse_args()
+    
+    # Parse SSH connection string
+    if "@" not in args.ssh:
+        print("Error: SSH connection must be in format username@hostname", file=sys.stderr)
+        sys.exit(1)
+    
+    username, host = args.ssh.split("@", 1)
+    
+    # Check if script exists
+    if not Path(args.script).exists():
+        print(f"Error: Script file '{args.script}' not found", file=sys.stderr)
+        sys.exit(1)
+    
+    try:
+        slurm = SlurmSSH(
+            host=host,
+            username=username, 
+            launch_script_path=args.script
+        )
+        
+        slurm.submit(exclude=args.exclude)
+        
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

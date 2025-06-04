@@ -6,12 +6,28 @@ SlurmSSH syncs your code to the cluster, then submits your job and prints its ou
 
 Your code is synced over SSH (rsync) and the job will continue running if your local machine is offline.
 
-Write and run a Python script locally to submit your job to the cluster.
+Use it as a command line tool or as a Python library.
 
-## Usage
+## CLI Usage
+
+After installing, use the `slurmssh` command to sync and submit jobs:
+
+```bash
+# Basic usage
+slurmssh --ssh username@hostname script.slurm
+
+# With custom exclusions
+slurmssh --ssh username@hostname script.slurm --exclude "data/" "*.log"
+
+# Show help
+slurmssh --help
+```
+
+## Library Usage
+
+Import and use SlurmSSH in your Python scripts:
 
 ```python
-
 from slurmssh import SlurmSSH
 
 slurm = SlurmSSH(
@@ -41,6 +57,16 @@ Ensure you have rsync installed locally:
 ```bash
 brew install rsync
 ```
+
+### CLI Installation
+
+Install globally with uvx for command line usage:
+
+```bash
+uvx install "slurmssh @ git+https://github.com/geotho/slurmssh"
+```
+
+### Library Installation
 
 Add slurmssh to your project:
 
