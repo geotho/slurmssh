@@ -36,6 +36,14 @@ slurm.submit(exclude=["data/", "*.log"])
 
 ## Installation
 
+Ensure you have rsync installed locally:
+
+```bash
+brew install rsync
+```
+
+Add slurmssh to your project:
+
 ```bash
 uv add "slurmssh @ git+https://github.com/geotho/slurmssh"
 ```
