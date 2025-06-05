@@ -46,6 +46,81 @@ class SlurmSSH:
         # Final fallback to current directory name
         return Path.cwd().name
 
+    def _uses_uv(self) -> bool:
+        """
+        Check if the project uses uv by looking for uv.lock or uv tools in pyproject.toml.
+        """
+        # Check for uv.lock file
+        if Path("uv.lock").exists():
+            return True
+        
+        # Check for uv tools in pyproject.toml
+        try:
+            if Path("pyproject.toml").exists():
+                with open("pyproject.toml", "r") as f:
+                    config = toml.load(f)
+                    if "tool" in config and "uv" in config["tool"]:
+                        return True
+        except Exception:
+            pass
+        
+        return False
+
+    def _generate_slurm_script(self, python_script: str, script_args: List[str] = None, output_dir: str = ".") -> str:
+        """
+        Generate a basic SLURM batch script for a Python script.
+        
+        Args:
+            python_script: Path to the Python script
+            script_args: Arguments to pass to the Python script
+            output_dir: Directory to save the generated .slurm file
+            
+        Returns:
+            Path to the generated .slurm file
+        """
+        script_name = Path(python_script).stem
+        slurm_filename = f"{script_name}.slurm"
+        slurm_path = Path(output_dir) / slurm_filename
+        
+        # Determine Python command
+        python_cmd = "uv run" if self._uses_uv() else "python"
+        
+        # Build command with arguments
+        cmd_parts = [python_cmd, python_script]
+        if script_args:
+            cmd_parts.extend(script_args)
+        full_command = " ".join(cmd_parts)
+        
+        # Generate basic SLURM script content
+        slurm_content = f"""#!/bin/bash
+#SBATCH --job-name={script_name}
+#SBATCH --output=slurm-%j.out
+#SBATCH --error=slurm-%j.err
+#SBATCH --time=01:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=4GB
+
+echo "Job ID: $SLURM_JOB_ID"
+echo "Job Name: $SLURM_JOB_NAME"
+echo "Node: $SLURM_NODELIST"
+echo "Started at: $(date)"
+echo "Working directory: $(pwd)"
+echo
+
+echo "Running Python script: {python_script}"
+{full_command}
+
+echo "Job completed at: $(date)"
+"""
+        
+        # Write the SLURM script
+        with open(slurm_path, "w") as f:
+            f.write(slurm_content)
+        
+        print(f"Generated SLURM script: {slurm_path}")
+        return str(slurm_path)
+
     def _run_ssh_command(self, command: str) -> subprocess.CompletedProcess:
         """Execute a command on the remote host via SSH."""
         ssh_cmd = ["ssh", f"{self.username}@{self.host}", command]
@@ -85,14 +160,14 @@ class SlurmSSH:
 
         print(f"Code synced to {self.host}:{self.remote_dir}")
 
-    def _submit_job(self, sbatch_args: Optional[List[str]] = None) -> str:
-        # Build sbatch command with additional arguments
-        cmd_parts = ["cd", self.remote_dir, "&&", "sbatch"]
+    def _submit_job(self, script_args: Optional[List[str]] = None) -> str:
+        # Build sbatch command
+        cmd_parts = ["cd", self.remote_dir, "&&", "sbatch", self.launch_script_path]
         
-        if sbatch_args:
-            cmd_parts.extend(sbatch_args)
+        # Add script arguments after the script name
+        if script_args:
+            cmd_parts.extend(script_args)
             
-        cmd_parts.append(self.launch_script_path)
         sbatch_cmd = " ".join(cmd_parts)
 
         result = self._run_ssh_command(sbatch_cmd)
@@ -108,17 +183,17 @@ class SlurmSSH:
         else:
             raise RuntimeError(f"Unexpected sbatch output: {output}")
 
-    def submit(self, exclude: Optional[List[str]] = None, sbatch_args: Optional[List[str]] = None):
+    def submit(self, exclude: Optional[List[str]] = None, script_args: Optional[List[str]] = None):
         """
         Main method to sync code and submit job.
 
         Args:
             exclude: List of additional patterns to exclude from rsync
-            sbatch_args: List of additional arguments to pass to sbatch
+            script_args: List of arguments to pass to the script
         """
         try:
             self._sync_code(exclude=exclude)
-            self._submit_job(sbatch_args=sbatch_args)
+            self._submit_job(script_args=script_args)
 
         except Exception as e:
             print(f"Error: {e}")
@@ -132,8 +207,9 @@ def main():
         epilog="""
 Examples:
   slurmssh --ssh username@hostname script.slurm
+  slurmssh --ssh username@hostname script.py  # Auto-generates SLURM script
   slurmssh --ssh user@cluster job.slurm --exclude "data/" "*.log"
-  slurmssh --ssh user@cluster job.slurm arg1 arg2
+  slurmssh --ssh user@cluster script.slurm arg1 arg2  # Script arguments
         """
     )
     
@@ -145,7 +221,7 @@ Examples:
     
     parser.add_argument(
         "script",
-        help="Path to Slurm job script (.slurm file)"
+        help="Path to Slurm job script (.slurm file) or Python script (.py file)"
     )
     
     parser.add_argument(
@@ -156,16 +232,12 @@ Examples:
     )
     
     parser.add_argument(
-        "sbatch_args",
+        "script_args",
         nargs="*",
-        help="Additional arguments to pass to sbatch"
+        help="Arguments to pass to the script"
     )
     
-    args, unknown = parser.parse_known_args()
-    
-    # Add any unknown arguments to sbatch_args
-    if unknown:
-        args.sbatch_args.extend(unknown)
+    args = parser.parse_args()
     
     # Parse SSH connection string
     if "@" not in args.ssh:
@@ -179,14 +251,24 @@ Examples:
         print(f"Error: Script file '{args.script}' not found", file=sys.stderr)
         sys.exit(1)
     
+    # Handle Python scripts by auto-generating SLURM script
+    script_path = Path(args.script)
+    if script_path.suffix == ".py":
+        print(f"Python script detected: {args.script}")
+        temp_slurm = SlurmSSH(host=host, username=username, launch_script_path=args.script)
+        slurm_script_path = temp_slurm._generate_slurm_script(args.script, args.script_args)
+        launch_script = slurm_script_path
+    else:
+        launch_script = args.script
+    
     try:
         slurm = SlurmSSH(
             host=host,
             username=username, 
-            launch_script_path=args.script
+            launch_script_path=launch_script
         )
         
-        slurm.submit(exclude=args.exclude, sbatch_args=args.sbatch_args)
+        slurm.submit(exclude=args.exclude, script_args=args.script_args)
         
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
